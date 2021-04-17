@@ -34,7 +34,7 @@
 #                        much smaller.
 #
 ARG AIRFLOW_VERSION="2.0.1"
-ARG AIRFLOW_EXTRAS="async,amazon,celery,cncf.kubernetes,docker,dask,elasticsearch,ftp,grpc,hashicorp,http,ldap,google,microsoft.azure,mysql,postgres,redis,sendgrid,sftp,slack,ssh,statsd,virtualenv"
+ARG AIRFLOW_EXTRAS="async,amazon,celery,cncf.kubernetes,docker,dask,elasticsearch,ftp,grpc,hashicorp,http,ldap,google,microsoft.azure,mssql,mysql,postgres,redis,sendgrid,sftp,slack,ssh,statsd,virtualenv"
 ARG ADDITIONAL_AIRFLOW_EXTRAS=""
 ARG ADDITIONAL_PYTHON_DEPS=""
 
@@ -62,7 +62,8 @@ ENV PYTHON_BASE_IMAGE=${PYTHON_BASE_IMAGE}
 
 # Make sure noninteractive debian install is used and language variables set
 ENV DEBIAN_FRONTEND=noninteractive LANGUAGE=C.UTF-8 LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-    LC_CTYPE=C.UTF-8 LC_MESSAGES=C.UTF-8
+    LC_CTYPE=C.UTF-8 LC_MESSAGES=C.UTF-8 
+
 
 # Install curl and gnupg2 - needed for many other installation steps
 RUN apt-get update \
@@ -82,6 +83,7 @@ ARG DEV_APT_DEPS="\
      dirmngr \
      freetds-bin \
      freetds-dev \
+     gcc \
      gosu \
      krb5-user \
      ldap-utils \
@@ -105,6 +107,7 @@ ARG DEV_APT_DEPS="\
      sudo \
      unixodbc \
      unixodbc-dev \
+     default-jdk \
      yarn"
 ENV DEV_APT_DEPS=${DEV_APT_DEPS}
 
@@ -191,7 +194,7 @@ ENV AIRFLOW_INSTALL_USER_FLAG="--user"
 ENV AIRFLOW_INSTALL_EDITABLE_FLAG=""
 
 # Upgrade to specific PIP version
-RUN pip install --no-cache-dir --upgrade "pip==${AIRFLOW_PIP_VERSION}"
+RUN pip install --no-cache-dir --upgrade "pip==${AIRFLOW_PIP_VERSION}" 
 
 # By default we do not use pre-cached packages, but in CI/Breeze environment we override this to speed up
 # builds in case setup.py/setup.cfg changed. This is pure optimisation of CI/Breeze builds.
@@ -366,6 +369,8 @@ ENV AIRFLOW_VERSION=${AIRFLOW_VERSION}
 ENV DEBIAN_FRONTEND=noninteractive LANGUAGE=C.UTF-8 LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     LC_CTYPE=C.UTF-8 LC_MESSAGES=C.UTF-8
 
+ENV ACCEPT_EULA=Y
+
 ARG AIRFLOW_PIP_VERSION
 ENV AIRFLOW_PIP_VERSION=${AIRFLOW_PIP_VERSION}
 
@@ -385,6 +390,7 @@ ARG RUNTIME_APT_DEPS="\
        curl \
        dumb-init \
        freetds-bin \
+       gcc \
        gnupg \
        gosu \
        krb5-user \
@@ -403,6 +409,9 @@ ARG RUNTIME_APT_DEPS="\
        sasl2-bin \
        sqlite3 \
        sudo \
+       default-jdk \
+       msodbcsql17 \
+       mssql-tools \
        unixodbc"
 ENV RUNTIME_APT_DEPS=${RUNTIME_APT_DEPS}
 
@@ -423,6 +432,18 @@ ARG ADDITIONAL_RUNTIME_APT_ENV=""
 RUN mkdir -pv /usr/share/man/man1 \
     && mkdir -pv /usr/share/man/man7 \
     && export ${ADDITIONAL_RUNTIME_APT_ENV?} \
+    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+    && curl https://packages.microsoft.com/config/debian/10/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && echo 'export PATH="$PATH:/opt/mssql-tools/bin"' >> ~/.bashrc \
+    && echo 'JAVA_HOME="/usr/lib/jvm/java-1.11.0-openjdk-amd64/"' >> /etc/environment \
+    && /bin/bash -c "source /etc/environment" \
+    && curl -O https://mirror.downloadvn.com/apache/spark/spark-3.1.1/spark-3.1.1-bin-hadoop3.2.tgz \
+    && tar -xvzf spark-3.1.1-bin-hadoop3.2.tgz \
+    && rm spark-3.1.1-bin-hadoop3.2.tgz \
+    && mv spark-3.1.1-bin-hadoop3.2 /usr/local/spark \
+    && echo 'export SPARK_HOME=/usr/local/spark' >> ~/.bashrc \
+    && echo 'export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin' >> ~/.bashrc \
+    && /bin/bash -c "source ~/.bashrc" \
     && bash -o pipefail -e -u -x -c "${RUNTIME_APT_COMMAND}" \
     && bash -o pipefail -e -u -x -c "${ADDITIONAL_RUNTIME_APT_COMMAND}" \
     && apt-get update \
@@ -475,7 +496,7 @@ COPY --chown=airflow:root scripts/in_container/prod/clean-logs.sh /clean-logs
 RUN chmod a+x /entrypoint /clean-logs
 
 RUN pip install --no-cache-dir --upgrade "pip==${AIRFLOW_PIP_VERSION}"
-
+RUN pip install --no-cache-dir SQLAlchemy==1.3.24
 # Make /etc/passwd root-group-writeable so that user can be dynamically added by OpenShift
 # See https://github.com/apache/airflow/issues/9248
 RUN chmod g=u /etc/passwd
